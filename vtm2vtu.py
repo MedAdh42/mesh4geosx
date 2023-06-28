@@ -8,6 +8,7 @@ from paraview.modules.vtkPVVTKExtensionsMisc import vtkMergeBlocks
 from pathlib import Path
 import numpy as np
 from argparse import ArgumentParser
+import xml.etree.ElementTree as ET
 
 
 vtkTypes = [  'VTK_EMPTY_CELL', 'VTK_VERTEX', 'VTK_POLY_VERTEX', 'VTK_LINE', 'VTK_POLY_LINE', 'VTK_TRIANGLE',
@@ -27,6 +28,11 @@ vtkTypes = [  'VTK_EMPTY_CELL', 'VTK_VERTEX', 'VTK_POLY_VERTEX', 'VTK_LINE', 'VT
               'VTK_LAGRANGE_TETRAHEDRON', 'VTK_LAGRANGE_HEXAHEDRON', 'VTK_LAGRANGE_WEDGE',
               'VTK_LAGRANGE_PYRAMID', 'VTK_BEZIER_CURVE', 'VTK_BEZIER_TRIANGLE', 'VTK_BEZIER_QUADRILATERAL',
               'VTK_BEZIER_TETRAHEDRON', 'VTK_BEZIER_HEXAHEDRON', 'VTK_BEZIER_WEDGE', 'VTK_BEZIER_PYRAMID']
+
+vtk_to_geosx = {'VTK_TETRA' : "tetrahedra",
+                'VTK_HEXAHEDRON': "hexahedra",
+                'VTK_TRIANGLE' : "triangle"}
+
 
 def processMultiblockDataSet(data: vtkMultiBlockDataSet, filename: str) -> (dict, bool):
     """
@@ -55,15 +61,13 @@ def processMultiblockDataSet(data: vtkMultiBlockDataSet, filename: str) -> (dict
             name = iterator.GetCurrentMetaData().Get(vtkCompositeDataSet.NAME())
             # create names array
             block_name_array = vtkStringArray()
-
             block_name_array.SetName("block_name")
+            block_name_array.SetNumberOfValues(nb_cells)
             for i in range(nb_cells):
-                block_name_array.InsertNextValue(name)
+                block_name_array.SetValue(i, name)
             # add names array
             current_block.GetCellData().AddArray(block_name_array)
-            block_name_array.
         else:
-            all_named = False
             name = None
             nb_cells = None
             cell_types = None
@@ -98,6 +102,32 @@ def processMultiblockDataSet(data: vtkMultiBlockDataSet, filename: str) -> (dict
     writer.Write()
 
     return mesh_info
+
+
+def writeElementRegionXML(mesh_info: dict, outputPath: str | Path):
+
+    # Create the root element
+    root = ET.Element("ElementRegions")
+
+    if mesh_info:
+        # loop over each region
+        for id in mesh_info.keys():
+            name = mesh_info[id][0]
+            nb_cell = mesh_info[id][2]
+            cell_types = mesh_info[id][2]
+            vtk_celltypes = [vtkTypes[celltype] for celltype in cell_types]
+            geosx_celltypes = [vtk_to_geosx[celltype] for celltype in vtk_celltypes]
+            cell_blocks = set(["_".join(str(id), celltype) for celltype in geosx_celltypes])
+            # create the element
+            element = ET.SubElement(root, "CellElementRegion")
+            element.set("name", name)
+            element.set("cellBlocks", cell_blocks)
+
+    # Create the XML tree
+    tree = ET.ElementTree(root)
+
+    # Write the XML tree to a file
+    tree.write(outputPath + ".xml", encoding="utf-8", xml_declaration=True)
 
 
 # Class of superclass Exception to be raised if vtkXMLMultiBlockDataReader() encounters problems
@@ -137,7 +167,7 @@ def main():
 
             # process the data
             outputPath = str(inputPath.parent.joinpath(args.outputFileName))
-            print("Writing grid at:", outputPath)
+            print("Writing grid in:", outputPath, ".vtu")
             mesh_info = processMultiblockDataSet(data, outputPath)
 
         else:
